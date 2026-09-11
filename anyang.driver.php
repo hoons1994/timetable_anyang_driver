@@ -1,113 +1,121 @@
-﻿<?php
-	/* 안양대 드라이버 */
-	class timetableDriver extends timetable {
-		public $update_type = array('excel');
-		function init() {
-			$this->days = array('월', '화', '수', '목', '금', '토');
-		}
+<?php
+/* 안양대 드라이버 */
+#[\AllowDynamicProperties]
+class timetableDriver extends timetable {
+    public $update_type = array('excel');
 
-		function findStartRow($data) {
-			if($data['A'] == 'No' && $data['B'] == '과목코드') return 1;
-			return false;
-		}
-		
-		function getPeriodStartTime($period) {
-			if($period < 1) return FALSE;
-			if($period <= 8) return intval(($period-1) * 60 + 540); // 1~8 교시 일경우
-			else if($period <= 14) return intval(($period-9) * 55 + 1020); // 9~14 교시 일경우
-			else return 9999;
-		}
+    function init() {
+        $this->days = array('월', '화', '수', '목', '금', '토');
+    }
 
-		function getPeriodEndTime($period) {
-			if($period < 1) return FALSE;
-			if($period <= 8) return intval(($period * 60) + 540 - 10); // 1~8 교시 일경우
-			else if($period <= 14) return intval(($period - 8) * 55 + 1020 - 5); // 9~14 교시 일경우
-			else return 9999;
-		}
-		
-		//엑셀 데이터 읽어오는 함수
-		function parseExcelData($data) {
-			$return = new stdClass(); //return 객체 생성
-			
-			$return->major = new stdClass();
-			if(!$data['K']) $return->major->name = '미지정';
-			else $return->major->name = $data['K']; //전공명
-			
-			
-			$return->course = new stdClass();
-			$return->course->name = $data['C']; //과목명
-			$return->course->codes = $data['B']; //과목코드
-			$return->course->category = $data['F']; //이수구분
-			$return->course->grade = $data['D']; //학년
-			$return->course->point = $data['L']; //학점
-			$return->course->desc = ''; //비고
+    function findStartRow($data) {
+        if (($data['A'] ?? null) === 'No' && ($data['B'] ?? null) === '과목코드') return 1;
+        return false;
+    }
 
-			//정수형으로 변환
-			$return->course->grade = intval($return->course->grade);
-			$return->course->point = intval($return->course->point);
+    function getPeriodStartTime($period) {
+        $period = intval($period);
+        if ($period < 1) return false;
+        if ($period <= 8) return intval(($period - 1) * 60 + 540); // 1~8 교시일 경우
+        if ($period <= 14) return intval(($period - 9) * 55 + 1020); // 9~14 교시일 경우
+        return 9999;
+    }
 
-			//분반 추가
-			$return->lecture = new stdClass();
-			$return->lecture->name = $return->course->name.'-'.$data['E']; //과목명-분반
-			$return->lecture->codes = $return->course->codes.'-'.$data['E']; //과목코드-분반
+    function getPeriodEndTime($period) {
+        $period = intval($period);
+        if ($period < 1) return false;
+        if ($period <= 8) return intval(($period * 60) + 540 - 10); // 1~8 교시일 경우
+        if ($period <= 14) return intval(($period - 8) * 55 + 1020 - 5); // 9~14 교시일 경우
+        return 9999;
+    }
 
-			$return->professor = new stdClass();
-			$return->professor->name = $data['I']; //교수명
-			$return->professor->codes = $data['H']; //교수코드
+    // 엑셀 데이터 읽어오는 함수
+    function parseExcelData($data) {
+        $return = new stdClass(); // return 객체 생성
 
-			$return->time = array();
-			$time = $data['S']; //강의시간
-			if(!$time) return $return;
+        $return->major = new stdClass();
+        $majorName = trim((string)($data['K'] ?? ''));
+        $return->major->name = $majorName !== '' ? $majorName : '미지정'; // 전공명
 
-			$times = array(); //배열 선언
-			
-			$tokenNumber1 = strpos($time, "),");
-			$tokenNumber2 = strrpos($time, "),");
-			
-			if ($tokenNumber1 == $tokenNumber2) $tokenNumber2 = FALSE;
-			
-			if ($tokenNumber1 == TRUE && $tokenNumber2 == TRUE){ //다중 시간표일때
-				$tokenNumber1 += 2; // ),을 찾았을 경우에는 나누기 위해서
-				$tokenNumber2 += 2; 
-				$times[0] = substr($time, 0, $tokenNumber1 - 1); //첫번째 강의실, 시간
-				$times[1] = substr($time, $tokenNumber1, (strlen($time) - $tokenNumber2)); //두번째 강의실, 시간
-				$times[2] = substr($time, ((strlen($time) - $tokenNumber1) + 1), strlen($time)); //세번째 강의실, 시간
-			}
-			else if($tokenNumber1 == TRUE && $tokenNumber2 == FALSE){ // 두개 시간표일때
-				$tokenNumber1 += 2; // ),을 찾았을 경우에는 나누기 위해서 
-				$times[0] = substr($time, 0, $tokenNumber1 - 1); //첫번째 강의실, 시간
-				$times[1] = substr($time, $tokenNumber1, (strlen($time) - $tokenNumber1)); //두번째 강의실, 시간
-				
-				if ($times[0] == "(,)"){
-					$times[0] = $times[1];
-					$times[1] = NULL;
-				}
-			}
-			else { //단일 시간표일때
-				$times[0] = $time; //시간 저장
-			}
-			
-			foreach($times as $key => $val) {
-				$vals = explode(':', $val); // : 를 기준으로 자름, vals[0] == 강의실, vals[1] == 시간표
-				$classroom_temp = explode('-', $vals[0]); // -를 기준으로 자름, classroom_temp[0] == 건물명, classroom_temp[1] == 호수
-				$classtime_temp = explode('(', $vals[1]); // (를 기준으로 자름, $classtime_temp[0] == 요일, $classtime_temp[1] == 교시
-				
-				$days = array_search ($classtime_temp[0], $this->days);		
-				if($days === false) $days = -1; //요일을 찾았는데 없을 경우
-				
-				$obj = new stdClass();
-				$obj->day = $days;
-				
-				$classtime_temp[1] = substr ( $classtime_temp[1], 0, (strlen($classtime_temp[1]) - 1));
-				$classtime = explode(',', $classtime_temp[1]);
-				
-				$obj->start = $this->getPeriodStartTime(min($classtime)); //시작 시간 구하기
-				$obj->end = $this->getPeriodEndTime(max($classtime)); //끝 시간 구하기
-				
-				$obj->classroom = $obj->classroom_building = $classroom_temp[0]." ".$classroom_temp[1]."호";
-				$return->time[] = $obj;
-			}
-			return $return;
-		}
-	}
-?>
+        $return->course = new stdClass();
+        $return->course->name = (string)($data['C'] ?? ''); // 과목명
+        $return->course->codes = (string)($data['B'] ?? ''); // 과목코드
+        $return->course->category = (string)($data['F'] ?? ''); // 이수구분
+        $return->course->grade = intval($data['D'] ?? 0); // 학년
+        $return->course->point = intval($data['L'] ?? 0); // 학점
+        $return->course->desc = ''; // 비고
+
+        // 분반 추가
+        $division = (string)($data['E'] ?? '');
+        $return->lecture = new stdClass();
+        $return->lecture->name = $return->course->name . '-' . $division; // 과목명-분반
+        $return->lecture->codes = $return->course->codes . '-' . $division; // 과목코드-분반
+
+        $return->professor = new stdClass();
+        $return->professor->name = (string)($data['I'] ?? ''); // 교수명
+        $return->professor->codes = (string)($data['H'] ?? ''); // 교수코드
+
+        $return->time = array();
+        $time = trim((string)($data['S'] ?? '')); // 강의시간
+        if ($time === '') return $return;
+
+        // 각 강의시간 항목은 닫는 괄호 뒤의 쉼표를 기준으로 분리한다.
+        // 기존 코드는 최대 3개 항목만 처리했고 세 번째 항목의 시작 위치 계산이 취약했다.
+        $times = preg_split('/(?<=\)),\s*/', $time);
+        if ($times === false) return $return;
+
+        foreach ($times as $val) {
+            $val = trim((string)$val);
+            if ($val === '' || $val === '(,)') continue;
+
+            // 첫 번째 ':'만 구분자로 사용하여 예상치 못한 추가 ':'가 있어도 안전하게 처리한다.
+            $vals = explode(':', $val, 2);
+            if (count($vals) !== 2) continue;
+
+            $classroomText = trim($vals[0]);
+            $classTimeText = trim($vals[1]);
+            if ($classTimeText === '') continue;
+
+            // 강의실: 건물명-호수
+            $classroomTemp = explode('-', $classroomText, 2);
+            $building = trim($classroomTemp[0] ?? '');
+            $room = trim($classroomTemp[1] ?? '');
+
+            // 시간: 요일(교시,교시...)
+            $classTimeTemp = explode('(', $classTimeText, 2);
+            if (count($classTimeTemp) !== 2) continue;
+
+            $dayName = trim($classTimeTemp[0]);
+            $periodText = rtrim(trim($classTimeTemp[1]), ") \t\n\r\0\x0B");
+            if ($periodText === '') continue;
+
+            $days = array_search($dayName, $this->days, true);
+            if ($days === false) $days = -1; // 요일을 찾았는데 없을 경우
+
+            $classTimes = array();
+            foreach (explode(',', $periodText) as $period) {
+                $period = trim($period);
+                if ($period === '' || !is_numeric($period)) continue;
+
+                $period = intval($period);
+                if ($period > 0) $classTimes[] = $period;
+            }
+            if (!$classTimes) continue;
+
+            $obj = new stdClass();
+            $obj->day = $days;
+            $obj->start = $this->getPeriodStartTime(min($classTimes)); // 시작 시간 구하기
+            $obj->end = $this->getPeriodEndTime(max($classTimes)); // 끝 시간 구하기
+
+            if ($room !== '') {
+                $obj->classroom = $obj->classroom_building = trim($building . ' ' . $room . '호');
+            } else {
+                $obj->classroom = $obj->classroom_building = $building;
+            }
+
+            $return->time[] = $obj;
+        }
+
+        return $return;
+    }
+}
